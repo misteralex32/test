@@ -1,0 +1,32 @@
+# Виртуальное окружение
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Файлы данных (если нужно исключить)
+*.xlsx
+*.json
+*.log
+
+# Файлы окружения
+.env
+.env.local
+.env.*.local
+
+# VS Code
+.vscode/
+.idea/
+
+# Системные файлы
+.DS_Store
+Thumbs.db
