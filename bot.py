@@ -24,8 +24,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment
 
 # --- Настройки ---
-BOT_TOKEN = "8717360750:AAEbHfHYt0wk0JtwbCvuJxBFK08-lSxqitM"
-ADMIN_IDS = [341440758, 885305710]
+ADMIN_IDS = [341440758, 885305710, ]
 
 EXPERT_IDS = [341440758, 885305710]
 
