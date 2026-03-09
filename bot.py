@@ -23,10 +23,16 @@ from aiogram.types import (
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment
 
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+if not BOT_TOKEN:
+    # Если переменная не найдена, пробуем другой вариант (для совместимости)
+    BOT_TOKEN = os.environ.get('BOT_TOKEN')
+    if not BOT_TOKEN:
+        raise ValueError("❌ Ошибка: BOT_TOKEN не найден в переменных окружения!")
 # --- Настройки ---
-ADMIN_IDS = [341440758, 885305710, ]
+ADMIN_IDS = [341440758, 885305710, 1299948387]
 
-EXPERT_IDS = [341440758, 885305710]
+EXPERT_IDS = [341440758, 885305710, 1299948387]
 
 EXCEL_FILE = "cdlqi_results.xlsx"
 HISTORY_FILE = "user_history.json"  # Файл для хранения истории тестов
