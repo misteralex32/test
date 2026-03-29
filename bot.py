@@ -373,49 +373,24 @@ def send_to_experts(vk, text):
             logger.error(f"Ошибка отправки эксперту {expert_id}: {e}")
 
 def send_excel_file(vk, user_id):
-    """Упрощенная отправка Excel файла через прямые запросы"""
+    """Отправка ссылки на скачивание Excel файла"""
     try:
         if not os.path.exists(EXCEL_FILE):
             send_msg(vk, user_id, "📊 База данных результатов пока пуста.")
             return False
         
+        # Получаем IP сервера
         import requests
+        server_ip = requests.get('http://checkip.amazonaws.com').text.strip()
         
-        # Отправляем файл напрямую через API
-        files = {'file': open(EXCEL_FILE, 'rb')}
+        # Отправляем ссылку
+        download_url = f"http://{server_ip}:8080/download"
+        send_msg(vk, user_id, 
+            f"📊 **Ссылка для скачивания результатов:**\n\n"
+            f"🔗 {download_url}\n\n"
+            f"Ссылка активна 5 минут. Нажмите на ссылку, чтобы скачать файл.\n\n"
+            f"Файл: {EXCEL_FILE}")
         
-        # Шаг 1: получаем сервер для загрузки
-        r1 = requests.post(
-            'https://api.vk.com/method/docs.getMessagesUploadServer',
-            data={'peer_id': user_id, 'type': 'doc', 'v': '5.131', 'access_token': VK_TOKEN}
-        )
-        upload_url = r1.json()['response']['upload_url']
-        
-        # Шаг 2: загружаем файл
-        r2 = requests.post(upload_url, files={'file': open(EXCEL_FILE, 'rb')})
-        file_data = r2.json()
-        
-        # Шаг 3: сохраняем документ
-        r3 = requests.post(
-            'https://api.vk.com/method/docs.save',
-            data={'file': file_data['file'], 'v': '5.131', 'access_token': VK_TOKEN}
-        )
-        doc = r3.json()['response'][0]
-        
-        # Шаг 4: отправляем сообщение с файлом
-        requests.post(
-            'https://api.vk.com/method/messages.send',
-            data={
-                'user_id': user_id,
-                'message': "📊 База результатов CDLQI-тестов.",
-                'attachment': f"doc{doc['owner_id']}_{doc['id']}",
-                'random_id': get_random_id(),
-                'v': '5.131',
-                'access_token': VK_TOKEN
-            }
-        )
-        
-        logger.info(f"✅ Excel файл отправлен пользователю {user_id}")
         return True
         
     except Exception as e:
