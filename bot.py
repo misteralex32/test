@@ -378,27 +378,42 @@ def send_excel_file(vk, user_id):
             send_msg(vk, user_id, "📊 База данных результатов пока пуста.")
             return False
         
-        upload_url = vk.docs.getMessagesUploadServer(peer_id=user_id, type='doc')['upload_url']
+        # Получаем URL для загрузки
+        upload_data = vk.docs.getMessagesUploadServer(peer_id=user_id, type='doc')
+        upload_url = upload_data['upload_url']
+        
+        # Загружаем файл
         import requests
         with open(EXCEL_FILE, 'rb') as f:
-            files = {'file': (EXCEL_FILE, f)}
-            response = requests.post(upload_url, files=files).json()
+            response = requests.post(upload_url, files={'file': f})
         
-        doc = vk.docs.save(file=response['file'])[0]
+        if response.status_code != 200:
+            send_msg(vk, user_id, f"❌ Ошибка загрузки: статус {response.status_code}")
+            return False
+        
+        # Сохраняем документ
+        save_data = vk.docs.save(file=response.json()['file'])
+        if not save_data:
+            send_msg(vk, user_id, "❌ Ошибка сохранения документа")
+            return False
+        
+        doc = save_data[0]
         attachment = f"doc{doc['owner_id']}_{doc['id']}"
         
-        params = {
-            'user_id': user_id,
-            'message': "📊 База результатов CDLQI-тестов.",
-            'attachment': attachment,
-            'random_id': get_random_id()
-        }
-        vk.messages.send(**params)
+        # Отправляем
+        vk.messages.send(
+            user_id=user_id,
+            message="📊 База результатов CDLQI-тестов.",
+            attachment=attachment,
+            random_id=get_random_id()
+        )
+        
         logger.info(f"✅ Excel файл отправлен пользователю {user_id}")
         return True
+        
     except Exception as e:
         logger.error(f"Ошибка отправки Excel: {e}")
-        send_msg(vk, user_id, f"❌ Ошибка при отправке файла: {e}")
+        send_msg(vk, user_id, f"❌ Ошибка: {str(e)}")
         return False
 
 def get_admin_stats(vk, user_id):
