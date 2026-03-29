@@ -373,7 +373,7 @@ def send_to_experts(vk, text):
             logger.error(f"Ошибка отправки эксперту {expert_id}: {e}")
 
 def send_excel_file(vk, user_id):
-    """Отправка Excel файла администратору"""
+    """Упрощенная отправка Excel файла через прямые запросы"""
     try:
         if not os.path.exists(EXCEL_FILE):
             send_msg(vk, user_id, "📊 База данных результатов пока пуста.")
@@ -381,56 +381,34 @@ def send_excel_file(vk, user_id):
         
         import requests
         
-        # Загружаем файл через docs.getMessagesUploadServer
-        response = requests.post(
+        # Отправляем файл напрямую через API
+        files = {'file': open(EXCEL_FILE, 'rb')}
+        
+        # Шаг 1: получаем сервер для загрузки
+        r1 = requests.post(
             'https://api.vk.com/method/docs.getMessagesUploadServer',
-            data={
-                'peer_id': user_id,
-                'type': 'doc',
-                'v': '5.131',
-                'access_token': VK_TOKEN
-            }
+            data={'peer_id': user_id, 'type': 'doc', 'v': '5.131', 'access_token': VK_TOKEN}
         )
+        upload_url = r1.json()['response']['upload_url']
         
-        result = response.json()
-        if 'error' in result:
-            send_msg(vk, user_id, f"❌ Ошибка API: {result['error']['error_msg']}")
-            return False
+        # Шаг 2: загружаем файл
+        r2 = requests.post(upload_url, files={'file': open(EXCEL_FILE, 'rb')})
+        file_data = r2.json()
         
-        upload_url = result['response']['upload_url']
-        
-        # Загружаем файл
-        with open(EXCEL_FILE, 'rb') as f:
-            files = {'file': f}
-            upload_response = requests.post(upload_url, files=files)
-        
-        upload_result = upload_response.json()
-        
-        # Сохраняем документ
-        save_response = requests.post(
+        # Шаг 3: сохраняем документ
+        r3 = requests.post(
             'https://api.vk.com/method/docs.save',
-            data={
-                'file': upload_result['file'],
-                'v': '5.131',
-                'access_token': VK_TOKEN
-            }
+            data={'file': file_data['file'], 'v': '5.131', 'access_token': VK_TOKEN}
         )
+        doc = r3.json()['response'][0]
         
-        save_result = save_response.json()
-        if 'error' in save_result:
-            send_msg(vk, user_id, f"❌ Ошибка сохранения: {save_result['error']['error_msg']}")
-            return False
-        
-        doc = save_result['response'][0]
-        attachment = f"doc{doc['owner_id']}_{doc['id']}"
-        
-        # Отправляем сообщение с файлом
-        send_response = requests.post(
+        # Шаг 4: отправляем сообщение с файлом
+        requests.post(
             'https://api.vk.com/method/messages.send',
             data={
                 'user_id': user_id,
                 'message': "📊 База результатов CDLQI-тестов.",
-                'attachment': attachment,
+                'attachment': f"doc{doc['owner_id']}_{doc['id']}",
                 'random_id': get_random_id(),
                 'v': '5.131',
                 'access_token': VK_TOKEN
@@ -441,10 +419,10 @@ def send_excel_file(vk, user_id):
         return True
         
     except Exception as e:
-        logger.error(f"Ошибка отправки Excel: {e}")
+        logger.error(f"Ошибка: {e}")
         send_msg(vk, user_id, f"❌ Ошибка: {str(e)}")
         return False
-
+    
 def get_admin_stats(vk, user_id):
     """Получение общей статистики для админов"""
     try:
