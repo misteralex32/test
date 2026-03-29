@@ -384,7 +384,7 @@ def send_excel_file(vk, user_id):
         server_ip = requests.get('http://checkip.amazonaws.com').text.strip()
         
         # Отправляем ссылку
-        download_url = f"http://{server_ip}:8080/download"
+        download_url = f"http://{server_ip}:80/download"
         send_msg(vk, user_id, 
             f"📊 **Ссылка для скачивания результатов:**\n\n"
             f"🔗 {download_url}\n\n"
