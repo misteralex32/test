@@ -373,60 +373,62 @@ def send_to_experts(vk, text):
             logger.error(f"Ошибка отправки эксперту {expert_id}: {e}")
 
 def send_excel_file(vk, user_id):
-    """Отправка Excel файла администратору (рабочая версия)"""
+    """Отправка Excel файла администратору (рабочая версия с peer_id)"""
     try:
-        # 1. Проверяем, существует ли файл
+        # Проверяем существование файла
         if not os.path.exists(EXCEL_FILE):
             send_msg(vk, user_id, "📊 База данных результатов пока пуста.")
             return False
-
-        # 2. Получаем URL для загрузки документа в личные сообщения
-        # ВАЖНО: параметр peer_id не нужен на этом этапе для загрузки
-        upload_server = vk.docs.getMessagesUploadServer(type='doc')
-        upload_url = upload_server['upload_url']
-
-        # 3. Загружаем файл на полученный URL
+        
+        # Импортируем requests
         import requests
+        
+        # Получаем URL для загрузки с указанием peer_id
+        upload_data = vk.method('docs.getMessagesUploadServer', {
+            'peer_id': user_id,
+            'type': 'doc'
+        })
+        upload_url = upload_data['upload_url']
+        
+        # Загружаем файл
         with open(EXCEL_FILE, 'rb') as f:
             files = {'file': (EXCEL_FILE, f, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
             response = requests.post(upload_url, files=files)
-
-        # Проверяем успешность загрузки
-        if response.status_code != 200:
-            send_msg(vk, user_id, f"❌ Ошибка загрузки файла на сервер ВК. Код: {response.status_code}")
-            return False
-
-        # 4. Получаем параметр 'file' из ответа сервера
-        file_data = response.json()
-        if 'file' not in file_data:
-            send_msg(vk, user_id, f"❌ Неверный ответ от сервера ВК: {file_data}")
-            return False
-
-        # 5. Сохраняем документ, передавая полученный параметр 'file'
-        saved_docs = vk.docs.save(file=file_data['file'])
         
-        if not saved_docs:
-            send_msg(vk, user_id, "❌ Не удалось сохранить документ.")
+        # Проверяем ответ
+        if response.status_code != 200:
+            send_msg(vk, user_id, f"❌ Ошибка загрузки: HTTP {response.status_code}")
             return False
-
-        # 6. Получаем данные сохраненного документа
-        doc = saved_docs[0]
+        
+        response_data = response.json()
+        if 'file' not in response_data:
+            send_msg(vk, user_id, f"❌ Неверный ответ: {response_data}")
+            return False
+        
+        # Сохраняем документ
+        saved_doc = vk.method('docs.save', {'file': response_data['file']})
+        
+        if not saved_doc:
+            send_msg(vk, user_id, "❌ Ошибка сохранения документа")
+            return False
+        
+        doc = saved_doc[0]
         attachment = f"doc{doc['owner_id']}_{doc['id']}"
-
-        # 7. Отправляем сообщение с прикрепленным файлом
-        vk.messages.send(
-            user_id=user_id,
-            message="📊 База результатов CDLQI-тестов.",
-            attachment=attachment,
-            random_id=get_random_id()
-        )
-
-        logger.info(f"✅ Excel файл успешно отправлен пользователю {user_id}")
+        
+        # Отправляем сообщение с файлом
+        vk.method('messages.send', {
+            'user_id': user_id,
+            'message': "📊 База результатов CDLQI-тестов.",
+            'attachment': attachment,
+            'random_id': get_random_id()
+        })
+        
+        logger.info(f"✅ Excel файл отправлен пользователю {user_id}")
         return True
-
+        
     except Exception as e:
         logger.error(f"Ошибка отправки Excel: {e}")
-        send_msg(vk, user_id, f"❌ Критическая ошибка: {str(e)}")
+        send_msg(vk, user_id, f"❌ Ошибка: {str(e)}")
         return False
 
 def get_admin_stats(vk, user_id):
