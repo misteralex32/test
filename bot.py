@@ -56,13 +56,13 @@ def parse_ids(env_var: str, default: str) -> List[int]:
             ids.append(int(part))
     return ids
 
-ADMIN_IDS = parse_ids('ADMIN_IDS', '341440758,885305710,1299948387')
-EXPERT_IDS = parse_ids('EXPERT_IDS', '341440758,885305710,1299948387')
+ADMIN_IDS = parse_ids('ADMIN_IDS', '226131218,103703375,410830374')
+EXPERT_IDS = parse_ids('EXPERT_IDS', '226131218,103703375,410830374')
 
 if not ADMIN_IDS:
-    ADMIN_IDS = [341440758, 885305710, 1299948387]
+    ADMIN_IDS = [226131218, 103703375, 410830374]
 if not EXPERT_IDS:
-    EXPERT_IDS = [341440758, 885305710, 1299948387]
+    EXPERT_IDS = [226131218, 103703375, 410830374]
 
 EXCEL_FILE = "cdlqi_results.xlsx"
 HISTORY_FILE = "user_history.json"
@@ -252,7 +252,7 @@ def send_photo(vk, user_id, photo_bytes, caption=""):
         return False
 
 # --- Клавиатуры ---
-def get_main_keyboard():
+def get_main_keyboard(user_id=None):
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button('🔍 CDLQI-тест', color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
@@ -264,6 +264,26 @@ def get_main_keyboard():
     keyboard.add_line()
     keyboard.add_button('💬 Чат родителей', color=VkKeyboardColor.SECONDARY)
     keyboard.add_button('🚨 Срочно к врачу?', color=VkKeyboardColor.NEGATIVE)
+    
+    # Кнопка админ-панели для администраторов
+    if user_id and user_id in ADMIN_IDS:
+        keyboard.add_line()
+        keyboard.add_button('🛡️ Админ-панель', color=VkKeyboardColor.PRIMARY)
+    
+    return keyboard
+
+def get_admin_keyboard():
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button('📥 Скачать Excel', color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button('📈 Общая статистика', color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button('📋 Последние тесты', color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button('📊 График по дням', color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button('🗑️ Очистить данные', color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button('🔙 На главную', color=VkKeyboardColor.PRIMARY)
     return keyboard
 
 def get_answer_keyboard():
@@ -351,67 +371,342 @@ def send_to_experts(vk, text):
         except Exception as e:
             logger.error(f"Ошибка отправки эксперту {expert_id}: {e}")
 
+def send_excel_file(vk, user_id):
+    """Отправка Excel файла администратору"""
+    try:
+        if not os.path.exists(EXCEL_FILE):
+            send_msg(vk, user_id, "📊 База данных результатов пока пуста.")
+            return False
+        
+        upload_url = vk.docs.getMessagesUploadServer(peer_id=user_id, type='doc')['upload_url']
+        import requests
+        with open(EXCEL_FILE, 'rb') as f:
+            files = {'file': (EXCEL_FILE, f)}
+            response = requests.post(upload_url, files=files).json()
+        
+        doc = vk.docs.save(file=response['file'])[0]
+        attachment = f"doc{doc['owner_id']}_{doc['id']}"
+        
+        params = {
+            'user_id': user_id,
+            'message': "📊 База результатов CDLQI-тестов.",
+            'attachment': attachment,
+            'random_id': get_random_id()
+        }
+        vk.messages.send(**params)
+        logger.info(f"✅ Excel файл отправлен пользователю {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка отправки Excel: {e}")
+        send_msg(vk, user_id, f"❌ Ошибка при отправке файла: {e}")
+        return False
+
+def get_admin_stats(vk, user_id):
+    """Получение общей статистики для админов"""
+    try:
+        if not os.path.exists(EXCEL_FILE):
+            send_msg(vk, user_id, "📊 База данных результатов пока пуста.")
+            return
+        
+        wb = load_workbook(EXCEL_FILE)
+        ws = wb.active
+        
+        total_tests = ws.max_row - 1
+        if total_tests == 0:
+            send_msg(vk, user_id, "📊 Нет данных.")
+            return
+        
+        # Собираем статистику
+        scores = []
+        users = set()
+        for row in range(2, ws.max_row + 1):
+            user_id_val = ws.cell(row, 1).value
+            score = ws.cell(row, 14).value  # колонка с баллами
+            if user_id_val:
+                users.add(user_id_val)
+            if score is not None:
+                scores.append(score)
+        
+        avg_score = sum(scores) / len(scores) if scores else 0
+        min_score = min(scores) if scores else 0
+        max_score = max(scores) if scores else 0
+        
+        # Распределение по уровням
+        levels = {"Минимальное": 0, "Лёгкое": 0, "Умеренное": 0, "Значительное": 0, "Экстремальное": 0}
+        for row in range(2, ws.max_row + 1):
+            impact = ws.cell(row, 15).value
+            if impact:
+                if "Минимальное" in impact:
+                    levels["Минимальное"] += 1
+                elif "Лёгкое" in impact:
+                    levels["Лёгкое"] += 1
+                elif "Умеренное" in impact:
+                    levels["Умеренное"] += 1
+                elif "Значительное" in impact:
+                    levels["Значительное"] += 1
+                elif "Экстремальное" in impact:
+                    levels["Экстремальное"] += 1
+        
+        stats_text = (
+            f"📊 **Статистика CDLQI**\n\n"
+            f"📝 Всего тестов: {total_tests}\n"
+            f"👥 Уникальных пользователей: {len(users)}\n"
+            f"📈 Средний балл: {avg_score:.1f}\n"
+            f"📉 Минимальный балл: {min_score}\n"
+            f"📈 Максимальный балл: {max_score}\n\n"
+            f"**Распределение по уровням:**\n"
+            f"🟢 Минимальное: {levels['Минимальное']}\n"
+            f"🟡 Лёгкое: {levels['Лёгкое']}\n"
+            f"🟠 Умеренное: {levels['Умеренное']}\n"
+            f"🔴 Значительное: {levels['Значительное']}\n"
+            f"⚫ Экстремальное: {levels['Экстремальное']}\n\n"
+            f"🗂️ Полный отчет можно скачать в админ-панели"
+        )
+        send_msg(vk, user_id, stats_text)
+        
+    except Exception as e:
+        logger.error(f"Ошибка чтения статистики: {e}")
+        send_msg(vk, user_id, f"❌ Ошибка при чтении статистики: {e}")
+
+def get_last_tests(vk, user_id, count=10):
+    """Показать последние тесты"""
+    try:
+        if not os.path.exists(EXCEL_FILE):
+            send_msg(vk, user_id, "📊 База данных результатов пока пуста.")
+            return
+        
+        wb = load_workbook(EXCEL_FILE)
+        ws = wb.active
+        
+        total_tests = ws.max_row - 1
+        if total_tests == 0:
+            send_msg(vk, user_id, "📊 Нет данных.")
+            return
+        
+        last_tests = []
+        start_row = max(2, ws.max_row - count + 1)
+        for row in range(start_row, ws.max_row + 1):
+            user_id_val = ws.cell(row, 1).value
+            username = ws.cell(row, 2).value
+            date = ws.cell(row, 3).value
+            score = ws.cell(row, 14).value
+            if user_id_val and date and score is not None:
+                last_tests.append(f"👤 {username} (id:{user_id_val}) | 📅 {str(date)[:10]} | 🎯 {score} баллов")
+        
+        if last_tests:
+            text = f"📊 **Последние {len(last_tests)} тестов:**\n\n" + "\n".join(last_tests)
+            send_msg(vk, user_id, text)
+        else:
+            send_msg(vk, user_id, "📊 Нет данных.")
+            
+    except Exception as e:
+        logger.error(f"Ошибка: {e}")
+        send_msg(vk, user_id, f"❌ Ошибка при чтении данных: {e}")
+
+def get_chart_by_date(vk, user_id):
+    """Создать график по датам для админов"""
+    if not MATPLOTLIB_AVAILABLE:
+        send_msg(vk, user_id, "❌ Графики недоступны. Matplotlib не установлен.")
+        return
+    
+    try:
+        if not os.path.exists(EXCEL_FILE):
+            send_msg(vk, user_id, "📊 База данных результатов пока пуста.")
+            return
+        
+        wb = load_workbook(EXCEL_FILE)
+        ws = wb.active
+        
+        dates = []
+        scores = []
+        for row in range(2, ws.max_row + 1):
+            date = ws.cell(row, 3).value
+            score = ws.cell(row, 14).value
+            if date and score is not None:
+                if isinstance(date, str):
+                    try:
+                        date = datetime.fromisoformat(date[:10])
+                    except:
+                        continue
+                dates.append(date)
+                scores.append(score)
+        
+        if len(dates) < 2:
+            send_msg(vk, user_id, "📊 Недостаточно данных для построения графика (нужно минимум 2 теста).")
+            return
+        
+        plt.figure(figsize=(12, 6))
+        plt.plot(dates, scores, marker='o', linewidth=2, markersize=6, color='#4CAF50')
+        plt.fill_between(dates, scores, alpha=0.3, color='#4CAF50')
+        plt.title('📊 Общая динамика CDLQI по всем пользователям', fontsize=16, pad=20)
+        plt.xlabel('Дата', fontsize=12)
+        plt.ylabel('Баллы CDLQI', fontsize=12)
+        plt.grid(True, alpha=0.3)
+        
+        plt.axhspan(0, 1, alpha=0.1, color='green', label='Минимальное (0-1)')
+        plt.axhspan(2, 5, alpha=0.1, color='lightgreen', label='Лёгкое (2-5)')
+        plt.axhspan(6, 10, alpha=0.1, color='yellow', label='Умеренное (6-10)')
+        plt.axhspan(11, 20, alpha=0.1, color='orange', label='Значительное (11-20)')
+        plt.axhspan(21, 30, alpha=0.1, color='red', label='Экстремальное (>20)')
+        
+        plt.legend(loc='upper right')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=100)
+        buf.seek(0)
+        plt.close()
+        
+        send_photo(vk, user_id, buf, "📊 График динамики CDLQI по всем тестам")
+        
+    except Exception as e:
+        logger.error(f"Ошибка создания графика: {e}")
+        send_msg(vk, user_id, f"❌ Ошибка при создании графика: {e}")
+
+def clear_admin_data(vk, user_id):
+    """Очистка данных (только для главного админа)"""
+    # Проверяем, что пользователь - главный администратор
+    if user_id != ADMIN_IDS[0]:
+        send_msg(vk, user_id, "⛔ Только главный администратор может очищать данные!")
+        return
+    
+    send_msg(vk, user_id, "⚠️ **ВНИМАНИЕ!** Вы собираетесь удалить ВСЕ данные!\n\n"
+                          "Это действие нельзя отменить.\n\n"
+                          "Для подтверждения введите код: **DELETE_123**\n\n"
+                          "Отправьте этот код в течение 30 секунд.", 
+                          keyboard=None)
+    
+    # Сохраняем состояние ожидания подтверждения
+    user_states[user_id] = 'confirm_delete'
+
 # --- Обработка сообщений ---
 def handle_message(vk, user_id, text):
     logger.info(f"Обработка от {user_id}: {text}")
     
-    # ============ 1. СНАЧАЛА ОБРАБАТЫВАЕМ ДНИ ============
-    if text == 'День 1':
-        send_msg(vk, user_id, 
-            "📚 **День 1: Миф 1**\n\n"
-            "**Миф:** Если есть шоколад, жирное, фастфуд — обязательно будут прыщи.\n\n"
-            "**Правда:** Данная связь значительно преувеличена, но большое количество продуктов с трансжирами может приводить к тому, что кожное сало становится более густым.\n\n"
-            "✨ Старайтесь питаться разнообразно, но не запрещайте ребенку любимую еду полностью.", 
-            keyboard=get_plan_keyboard())
+    # ============ ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ ============
+    if user_states.get(user_id) == 'confirm_delete':
+        if text == 'DELETE_123':
+            try:
+                if os.path.exists(EXCEL_FILE):
+                    os.remove(EXCEL_FILE)
+                if os.path.exists(HISTORY_FILE):
+                    os.remove(HISTORY_FILE)
+                if os.path.exists(ACHIEVEMENTS_FILE):
+                    os.remove(ACHIEVEMENTS_FILE)
+                init_excel()
+                global user_history, user_achievements
+                user_history = {}
+                user_achievements = {}
+                send_msg(vk, user_id, "✅ Все данные успешно очищены!", keyboard=get_main_keyboard(user_id))
+            except Exception as e:
+                send_msg(vk, user_id, f"❌ Ошибка при очистке: {e}", keyboard=get_main_keyboard(user_id))
+        else:
+            send_msg(vk, user_id, "❌ Неверный код. Очистка данных отменена.", keyboard=get_main_keyboard(user_id))
+        user_states.pop(user_id, None)
         return
     
-    if text == 'День 2':
-        send_msg(vk, user_id,
-            "🧠 **День 2: Психологическая поддержка**\n\n"
-            "Психологическая травма от акне может быть гораздо сильнее физической.\n\n"
-            "**Простые советы, как не навредить ребенку:**\n\n"
-            "• Следите за своим невербальным поведением\n"
-            "• Не смотрите на прыщи ребенка во время разговора\n"
-            "• Не трогайте его лицо, пытаясь что-то рассмотреть или выдавить\n\n"
-            "Это нарушает личные границы и усиливает ощущение «дефекта».",
-            keyboard=get_plan_keyboard())
+    # ============ 1. АДМИН-ПАНЕЛЬ ============
+    if text == '🛡️ Админ-панель':
+        if user_id not in ADMIN_IDS:
+            send_msg(vk, user_id, "⛔ У вас нет прав для выполнения этой команды.")
+            return
+        send_msg(vk, user_id, "🛡️ **Админ-панель**\n\nВыберите действие:", keyboard=get_admin_keyboard())
         return
     
-    if text == 'День 3':
-        send_msg(vk, user_id,
-            "💊 **День 3: Миф 2**\n\n"
-            "**Миф:** Лекарства от акне не существует, это навсегда.\n\n"
-            "**Правда:** Лекарство существует, но как и большая часть дерматологических заболеваний, акне — это хронический процесс.\n\n"
-            "В течение жизни может быть длительная ремиссия, но обострения не исключены. Очень важно соблюдать здоровый образ жизни и определенные правила ухода.",
-            keyboard=get_plan_keyboard())
+    if text == '📥 Скачать Excel':
+        if user_id not in ADMIN_IDS:
+            return
+        send_excel_file(vk, user_id)
         return
     
-    if text == 'День 4':
-        send_msg(vk, user_id,
-            "🎯 **День 4: Контроль, а не критика**\n\n"
-            "Вместо фразы «Ты опять не помазал крем?» используйте совместный ритуал.\n\n"
-            "Подросткам сложно соблюдать регулярность из-за особенностей работы лобных долей мозга (отвечают за самоконтроль).\n\n"
-            "**Ваша задача:** мягко напоминать или сделать уход совместным вечерним действием.",
-            keyboard=get_plan_keyboard())
+    if text == '📈 Общая статистика':
+        if user_id not in ADMIN_IDS:
+            return
+        get_admin_stats(vk, user_id)
         return
     
-    if text == 'День 5':
-        send_msg(vk, user_id,
-            "⚕️ **День 5: Миф 3**\n\n"
-            "**Миф:** Системные ретиноиды (Акнекутан, Роаккутан, Сотрет) разрушают печень.\n\n"
-            "**Правда:** Современные схемы и корректные дозировки лишь в некоторых случаях могут приводить к повышению печеночных ферментов (АЛТ, АСТ).\n\n"
-            "Обычно это повышение проходит самостоятельно и бессимптомно. Прием препаратов должен проходить под контролем врача.",
-            keyboard=get_plan_keyboard())
+    if text == '📋 Последние тесты':
+        if user_id not in ADMIN_IDS:
+            return
+        get_last_tests(vk, user_id)
         return
     
-    # ============ 2. КОНСУЛЬТАЦИЯ ЭКСПЕРТА ============
+    if text == '📊 График по дням':
+        if user_id not in ADMIN_IDS:
+            return
+        get_chart_by_date(vk, user_id)
+        return
+    
+    if text == '🗑️ Очистить данные':
+        if user_id not in ADMIN_IDS:
+            return
+        clear_admin_data(vk, user_id)
+        return
+    
+    # ============ 2. ДНИ ============
+    if 'День' in text:
+        day_num = None
+        for ch in text:
+            if ch.isdigit():
+                day_num = ch
+                break
+        
+        if day_num == '1':
+            msg = ("📚 **День 1: Миф 1**\n\n"
+                   "**Миф:** Если есть шоколад, жирное, фастфуд — обязательно будут прыщи.\n\n"
+                   "**Правда:** Данная связь значительно преувеличена, но большое количество продуктов с трансжирами может приводить к тому, что кожное сало становится более густым.\n\n"
+                   "✨ Старайтесь питаться разнообразно, но не запрещайте ребенку любимую еду полностью.")
+            send_msg(vk, user_id, msg, keyboard=get_plan_keyboard())
+            return
+        
+        elif day_num == '2':
+            msg = ("🧠 **День 2: Психологическая поддержка**\n\n"
+                   "Психологическая травма от акне может быть гораздо сильнее физической.\n\n"
+                   "**Простые советы, как не навредить ребенку:**\n\n"
+                   "• Следите за своим невербальным поведением\n"
+                   "• Не смотрите на прыщи ребенка во время разговора\n"
+                   "• Не трогайте его лицо, пытаясь что-то рассмотреть или выдавить\n\n"
+                   "Это нарушает личные границы и усиливает ощущение «дефекта».")
+            send_msg(vk, user_id, msg, keyboard=get_plan_keyboard())
+            return
+        
+        elif day_num == '3':
+            msg = ("💊 **День 3: Миф 2**\n\n"
+                   "**Миф:** Лекарства от акне не существует, это навсегда.\n\n"
+                   "**Правда:** Лекарство существует, но как и большая часть дерматологических заболеваний, акне — это хронический процесс.\n\n"
+                   "В течение жизни может быть длительная ремиссия, но обострения не исключены. Очень важно соблюдать здоровый образ жизни и определенные правила ухода.")
+            send_msg(vk, user_id, msg, keyboard=get_plan_keyboard())
+            return
+        
+        elif day_num == '4':
+            msg = ("🎯 **День 4: Контроль, а не критика**\n\n"
+                   "Вместо фразы «Ты опять не помазал крем?» используйте совместный ритуал.\n\n"
+                   "Подросткам сложно соблюдать регулярность из-за особенностей работы лобных долей мозга (отвечают за самоконтроль).\n\n"
+                   "**Ваша задача:** мягко напоминать или сделать уход совместным вечерним действием.")
+            send_msg(vk, user_id, msg, keyboard=get_plan_keyboard())
+            return
+        
+        elif day_num == '5':
+            msg = ("⚕️ **День 5: Миф 3**\n\n"
+                   "**Миф:** Системные ретиноиды (Акнекутан, Роаккутан, Сотрет) разрушают печень.\n\n"
+                   "**Правда:** Современные схемы и корректные дозировки лишь в некоторых случаях могут приводить к повышению печеночных ферментов (АЛТ, АСТ).\n\n"
+                   "Обычно это повышение проходит самостоятельно и бессимптомно. Прием препаратов должен проходить под контролем врача.")
+            send_msg(vk, user_id, msg, keyboard=get_plan_keyboard())
+            return
+        
+        else:
+            send_msg(vk, user_id, "Пожалуйста, выберите день от 1 до 5", keyboard=get_plan_keyboard())
+            return
+    
+    # ============ 3. КОНСУЛЬТАЦИЯ ЭКСПЕРТА ============
     state = user_states.get(user_id, 'main')
     
     if state == 'expert_skin':
         if text == '🔙 На главную':
             user_states.pop(user_id, None)
             user_fsm_data.pop(user_id, None)
-            send_msg(vk, user_id, "Консультация отменена", keyboard=get_main_keyboard())
+            send_msg(vk, user_id, "Консультация отменена", keyboard=get_main_keyboard(user_id))
             return
         user_fsm_data[user_id] = {'skin': text}
         user_states[user_id] = 'expert_problems'
@@ -422,7 +717,7 @@ def handle_message(vk, user_id, text):
         if text == '🔙 На главную':
             user_states.pop(user_id, None)
             user_fsm_data.pop(user_id, None)
-            send_msg(vk, user_id, "Консультация отменена", keyboard=get_main_keyboard())
+            send_msg(vk, user_id, "Консультация отменена", keyboard=get_main_keyboard(user_id))
             return
         user_fsm_data[user_id]['problems'] = text
         user_states[user_id] = 'expert_budget'
@@ -433,7 +728,7 @@ def handle_message(vk, user_id, text):
         if text == '🔙 На главную':
             user_states.pop(user_id, None)
             user_fsm_data.pop(user_id, None)
-            send_msg(vk, user_id, "Консультация отменена", keyboard=get_main_keyboard())
+            send_msg(vk, user_id, "Консультация отменена", keyboard=get_main_keyboard(user_id))
             return
         user_fsm_data[user_id]['budget'] = text
         user_states[user_id] = 'expert_additional'
@@ -462,17 +757,17 @@ def handle_message(vk, user_id, text):
             save_json(ACHIEVEMENTS_FILE, user_achievements)
             send_msg(vk, user_id, "🏆 Получено достижение «Профессионал» за обращение к эксперту!")
         
-        send_msg(vk, user_id, "✅ Заявка отправлена! Наши эксперты получили вашу информацию и свяжутся с вами в ближайшее время (обычно в течение 24 часов).", keyboard=get_main_keyboard())
+        send_msg(vk, user_id, "✅ Заявка отправлена! Наши эксперты получили вашу информацию и свяжутся с вами в ближайшее время (обычно в течение 24 часов).", keyboard=get_main_keyboard(user_id))
         user_states.pop(user_id, None)
         user_fsm_data.pop(user_id, None)
         return
     
-    # ============ 3. ТЕСТ CDLQI ============
+    # ============ 4. ТЕСТ CDLQI ============
     if state == 'test':
         if text == '🔙 Отмена':
             user_states.pop(user_id, None)
             user_fsm_data.pop(user_id, None)
-            send_msg(vk, user_id, "❌ Тест отменен. Возвращайтесь, когда будете готовы!", keyboard=get_main_keyboard())
+            send_msg(vk, user_id, "❌ Тест отменен. Возвращайтесь, когда будете готовы!", keyboard=get_main_keyboard(user_id))
             return
         
         score_map = {'0️⃣ Никогда': 0, '1️⃣ Редко': 1, '2️⃣ Иногда': 2, '3️⃣ Часто': 3, '4️⃣ Всегда': 4}
@@ -520,17 +815,17 @@ def handle_message(vk, user_id, text):
             
             user_states.pop(user_id, None)
             user_fsm_data.pop(user_id, None)
-            send_msg(vk, user_id, "Выберите действие:", keyboard=get_main_keyboard())
+            send_msg(vk, user_id, "Выберите действие:", keyboard=get_main_keyboard(user_id))
         return
     
-    # ============ 4. КНОПКА НАЗАД ============
+    # ============ 5. КНОПКА НАЗАД ============
     if text == '🔙 На главную':
         user_states.pop(user_id, None)
         user_fsm_data.pop(user_id, None)
-        send_msg(vk, user_id, "👋 Главное меню", keyboard=get_main_keyboard())
+        send_msg(vk, user_id, "👋 Главное меню", keyboard=get_main_keyboard(user_id))
         return
     
-    # ============ 5. ГЛАВНОЕ МЕНЮ ============
+    # ============ 6. ГЛАВНОЕ МЕНЮ ============
     if text == '🔍 CDLQI-тест':
         user_answers[user_id] = {}
         user_states[user_id] = 'test'
@@ -541,7 +836,7 @@ def handle_message(vk, user_id, text):
     if text == '📊 Моя статистика':
         history = get_history(user_id)
         if not history:
-            send_msg(vk, user_id, "📊 У вас пока нет тестов. Пройдите первый тест!", keyboard=get_main_keyboard())
+            send_msg(vk, user_id, "📊 У вас пока нет тестов. Пройдите первый тест!", keyboard=get_main_keyboard(user_id))
             return
         last = history[-1]
         first = history[0]
@@ -552,7 +847,7 @@ def handle_message(vk, user_id, text):
             send_photo(vk, user_id, chart, text_stats)
         else:
             send_msg(vk, user_id, text_stats)
-        send_msg(vk, user_id, "Выберите действие:", keyboard=get_main_keyboard())
+        send_msg(vk, user_id, "Выберите действие:", keyboard=get_main_keyboard(user_id))
         return
     
     if text == '🏆 Мои достижения':
@@ -568,7 +863,7 @@ def handle_message(vk, user_id, text):
                 ach_text += f"{names.get(ach, ach)}\n"
         else:
             ach_text = "🏆 У вас пока нет достижений. Проходите тесты и получайте награды!"
-        send_msg(vk, user_id, ach_text, keyboard=get_main_keyboard())
+        send_msg(vk, user_id, ach_text, keyboard=get_main_keyboard(user_id))
         return
     
     if text == '👩‍⚕️ Консультация эксперта':
@@ -581,11 +876,11 @@ def handle_message(vk, user_id, text):
         return
     
     if text == '💬 Чат родителей':
-        send_msg(vk, user_id, "💬 Чат родителей\n\nПрисоединяйтесь к нашему чату поддержки, делитесь опытом и получайте советы от других родителей!\n\nСсылка: https://vk.me/join/dp2dhF6a36AV74F1r3TNh7eheF7E4zCZFco=", keyboard=get_main_keyboard())
+        send_msg(vk, user_id, "💬 Чат родителей\n\nПрисоединяйтесь к нашему чату поддержки, делитесь опытом и получайте советы от других родителей!\n\nСсылка: https://vk.me/join/dp2dhF6a36AV74F1r3TNh7eheF7E4zCZFco=", keyboard=get_main_keyboard(user_id))
         return
     
     if text == '🚨 Срочно к врачу?':
-        send_msg(vk, user_id, "🚨 Срочно к врачу, если:\n\n⚠️ CDLQI >20\n⚠️ Появились шрамы, кровотечение, гной\n⚠️ Подросток в депрессии, изолируется\n⚠️ Нет улучшений после 4 недель ухода\n\n📝 Подготовьте фото, результаты теста и запишитесь к дерматологу.", keyboard=get_main_keyboard())
+        send_msg(vk, user_id, "🚨 Срочно к врачу, если:\n\n⚠️ CDLQI >20\n⚠️ Появились шрамы, кровотечение, гной\n⚠️ Подросток в депрессии, изолируется\n⚠️ Нет улучшений после 4 недель ухода\n\n📝 Подготовьте фото, результаты теста и запишитесь к дерматологу.", keyboard=get_main_keyboard(user_id))
         return
     
     # Приветствие для новых пользователей
@@ -600,7 +895,7 @@ def handle_message(vk, user_id, text):
         "• 💬 Чат поддержки родителей\n\n"
         "Выберите, что хотите сделать:"
     )
-    send_msg(vk, user_id, welcome_text, keyboard=get_main_keyboard())
+    send_msg(vk, user_id, welcome_text, keyboard=get_main_keyboard(user_id))
 
 # --- Запуск бота ---
 def main():
