@@ -373,34 +373,28 @@ def send_to_experts(vk, text):
             logger.error(f"Ошибка отправки эксперту {expert_id}: {e}")
 
 def send_excel_file(vk, user_id):
-    """Отправка Excel файла - максимально простая версия"""
+    """Отправка ссылки на скачивание Excel файла через Flask"""
     try:
         if not os.path.exists(EXCEL_FILE):
             send_msg(vk, user_id, "📊 База данных результатов пока пуста.")
             return False
         
-        # Используем vk_api напрямую
-        import vk_api
-        from vk_api.upload import VkUpload
+        # Получаем внешний IP
+        import requests
+        try:
+            server_ip = requests.get('http://checkip.amazonaws.com', timeout=3).text.strip()
+        except:
+            server_ip = "91.224.86.161"  # Ваш IP
         
-        upload = VkUpload(vk)
-        doc = upload.document(
-            file=EXCEL_FILE,
-            title="cdlqi_results.xlsx",
-            peer_id=user_id,
-            type='doc'
-        )
+        download_url = f"http://{server_ip}:5000/download"
         
-        attachment = f"doc{doc['owner_id']}_{doc['id']}"
+        send_msg(vk, user_id, 
+            f"📊 **Скачать результаты тестов:**\n\n"
+            f"🔗 {download_url}\n\n"
+            f"Нажмите на ссылку, чтобы скачать Excel файл.\n"
+            f"Файл: cdlqi_results.xlsx\n\n"
+            f"Ссылка активна всегда.")
         
-        vk.messages.send(
-            user_id=user_id,
-            attachment=attachment,
-            random_id=get_random_id(),
-            message="📊 База результатов CDLQI-тестов."
-        )
-        
-        logger.info(f"✅ Excel файл отправлен пользователю {user_id}")
         return True
         
     except Exception as e:
