@@ -373,39 +373,76 @@ def send_to_experts(vk, text):
             logger.error(f"Ошибка отправки эксперту {expert_id}: {e}")
 
 def send_excel_file(vk, user_id):
-    """Максимально простая отправка файла"""
+    """Отправка Excel файла администратору"""
     try:
         if not os.path.exists(EXCEL_FILE):
-            send_msg(vk, user_id, "📊 Нет данных")
+            send_msg(vk, user_id, "📊 База данных результатов пока пуста.")
             return False
         
         import requests
         
-        # Получаем сервер для загрузки
-        upload_url = vk.method('docs.getMessagesUploadServer', {
-            'peer_id': user_id,
-            'type': 'doc'
-        })['upload_url']
+        # Загружаем файл через docs.getMessagesUploadServer
+        response = requests.post(
+            'https://api.vk.com/method/docs.getMessagesUploadServer',
+            data={
+                'peer_id': user_id,
+                'type': 'doc',
+                'v': '5.131',
+                'access_token': VK_TOKEN
+            }
+        )
+        
+        result = response.json()
+        if 'error' in result:
+            send_msg(vk, user_id, f"❌ Ошибка API: {result['error']['error_msg']}")
+            return False
+        
+        upload_url = result['response']['upload_url']
         
         # Загружаем файл
         with open(EXCEL_FILE, 'rb') as f:
-            response = requests.post(upload_url, files={'file': f})
+            files = {'file': f}
+            upload_response = requests.post(upload_url, files=files)
         
-        # Сохраняем
-        doc = vk.method('docs.save', {'file': response.json()['file']})[0]
+        upload_result = upload_response.json()
         
-        # Отправляем
-        vk.method('messages.send', {
-            'user_id': user_id,
-            'message': "📊 Результаты тестов",
-            'attachment': f"doc{doc['owner_id']}_{doc['id']}",
-            'random_id': get_random_id()
-        })
+        # Сохраняем документ
+        save_response = requests.post(
+            'https://api.vk.com/method/docs.save',
+            data={
+                'file': upload_result['file'],
+                'v': '5.131',
+                'access_token': VK_TOKEN
+            }
+        )
         
+        save_result = save_response.json()
+        if 'error' in save_result:
+            send_msg(vk, user_id, f"❌ Ошибка сохранения: {save_result['error']['error_msg']}")
+            return False
+        
+        doc = save_result['response'][0]
+        attachment = f"doc{doc['owner_id']}_{doc['id']}"
+        
+        # Отправляем сообщение с файлом
+        send_response = requests.post(
+            'https://api.vk.com/method/messages.send',
+            data={
+                'user_id': user_id,
+                'message': "📊 База результатов CDLQI-тестов.",
+                'attachment': attachment,
+                'random_id': get_random_id(),
+                'v': '5.131',
+                'access_token': VK_TOKEN
+            }
+        )
+        
+        logger.info(f"✅ Excel файл отправлен пользователю {user_id}")
         return True
         
     except Exception as e:
-        send_msg(vk, user_id, f"❌ {str(e)}")
+        logger.error(f"Ошибка отправки Excel: {e}")
+        send_msg(vk, user_id, f"❌ Ошибка: {str(e)}")
         return False
 
 def get_admin_stats(vk, user_id):
@@ -572,16 +609,16 @@ def get_chart_by_date(vk, user_id):
         send_msg(vk, user_id, f"❌ Ошибка при создании графика: {e}")
 
 def clear_admin_data(vk, user_id):
-    """Очистка данных (только для главного админа)"""
-    # Проверяем, что пользователь - главный администратор
-    if user_id != ADMIN_IDS[0]:
-        send_msg(vk, user_id, "⛔ Только главный администратор может очищать данные!")
+    """Очистка данных (доступно всем администраторам)"""
+    # Проверяем, что пользователь - администратор
+    if user_id not in ADMIN_IDS:
+        send_msg(vk, user_id, "⛔ У вас нет прав для выполнения этой команды!")
         return
     
     send_msg(vk, user_id, "⚠️ **ВНИМАНИЕ!** Вы собираетесь удалить ВСЕ данные!\n\n"
                           "Это действие нельзя отменить.\n\n"
                           "Для подтверждения введите код: **DELETE_123**\n\n"
-                          "Отправьте этот код в течение 30 секунд.", 
+                          "Отправьте этот код в течение 60 секунд.", 
                           keyboard=None)
     
     # Сохраняем состояние ожидания подтверждения
@@ -592,6 +629,7 @@ def handle_message(vk, user_id, text):
     logger.info(f"Обработка от {user_id}: {text}")
     
     # ============ ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ ============
+    # В функции handle_message, в разделе подтверждения удаления:
     if user_states.get(user_id) == 'confirm_delete':
         if text == 'DELETE_123':
             try:
